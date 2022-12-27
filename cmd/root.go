@@ -5,16 +5,18 @@ Copyright © 2022 NAME HERE <EMAIL ADDRESS>
 package cmd
 
 import (
-	"os"
+  "os"
   "io"
   "fmt"
   "errors"
   "net/http"
   "regexp"
   "time"
+  "strings"
+  // "sync"
 
   "github.com/PuerkitoBio/goquery"
-	"github.com/spf13/cobra"
+  "github.com/spf13/cobra"
   "github.com/tidwall/gjson"
   "github.com/cavaliergopher/grab/v3"
   "github.com/artdarek/go-unzip"
@@ -28,46 +30,57 @@ type Album struct {
 }
 
 var (
-  format  string
+  format        string
+  keepArchives  bool
+  downloadStr   string
 )
 
-var rootCmd = &cobra.Command{
-  Use:   "bandcamp-dl",
-  Short: "Downloads items from bandcamp purchase pages",
-  Long: `A longer description that spans multiple lines and likely contains
-examples and usage of using your application. For example:
+var Formats = []string{"mp3-v0", "mp3-320", "flac", "aac-hi", "vorbis", "alac", "wav", "aiff-lossless"}
+var titleRe = regexp.MustCompile(`[\/,:]`)
 
-Cobra is a CLI library for Go that empowers applications.
-This application is a tool to generate the needed files
-to quickly create a Cobra application.`,
-  Run: func(cmd *cobra.Command, args []string) { 
+var rootCmd = &cobra.Command{
+  Use:   "bandcamp-dl [flags] [url]",
+  Short: "Downloads items from bandcamp purchase pages",
+  Long: `bcdl handles downloading purchaes from bandcamp
+download pages.`,
+  Args: func(cmd *cobra.Command, args []string) error {
+    if err := cobra.MinimumNArgs(1)(cmd, args); err != nil {
+      return err
+    }
+    if !checkFormat() {
+      return errors.New(fmt.Sprintf("Invalid format. Must be one of: %s", strings.Trim(fmt.Sprint(Formats), "[]")))
+    }
+    return nil
+  },
+  Run: func(cmd *cobra.Command, args []string) {
     getDownloads(args[0])
   },
 }
 
-var titleRe = regexp.MustCompile(`[\/,:]`)
-
 var client = grab.NewClient()
 
-// Execute adds all child commands to the root command and sets flags appropriately.
-// This is called by main.main(). It only needs to happen once to the rootCmd.
-func Execute() {
-	err := rootCmd.Execute()
-	if err != nil {
-		os.Exit(1)
-	}
+func init() {
+  rootCmd.PersistentFlags().StringVar(&format, "format", "alac", "format to download items. default is ALAC")
+  rootCmd.PersistentFlags().BoolVarP(&keepArchives, "keep-archives", "D", false, "Keep zip files after extraction?")
 }
 
-func init() {
-	// Here you will define your flags and configuration settings.
-	// Cobra supports persistent flags, which, if defined here,
-	// will be global for your application.
+func Execute() {
+  if err := rootCmd.Execute(); err != nil {
+    fmt.Println(err)
+    os.Exit(1)
+  }
+}
 
-	rootCmd.PersistentFlags().StringVar(&format, "format", "alac", "format to download items. default is ALAC")
-
-	// Cobra also supports local flags, which will only run
-	// when this action is called directly.
-	rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+func checkFormat() bool {
+  var result bool = false
+  for i := 0; i < len(Formats); i++ {
+    if Formats[i] == format {
+      result = true
+      break
+    }
+  }
+  downloadStr = fmt.Sprintf("downloads.%s.url", format)
+  return result
 }
 
 func getDownloads(url string) {
@@ -102,36 +115,43 @@ func parseHtml(body io.ReadCloser) {
 func parseJSON(val string) {
   var data []Album
 
-  downloadStr := fmt.Sprintf("downloads.%s.url", format)
-
   result := gjson.Get(val, "download_items")
   result.ForEach(func(key, value gjson.Result) bool {
-    var album Album
-    album.Artist = value.Get("artist").String()
-    album.Title = value.Get("title").String()
-    album.Url = value.Get(downloadStr).String()
-    data = append(data, album)
+    var tralbums = value.Get("tralbums.#").Int()
+    var t int64
+    if tralbums > 0 {
+      for t = 0; t < tralbums; t++ {
+        data = append(data, parseAlbum(value.Get(fmt.Sprintf("tralbums.%d", t))))
+      }
+    } else {
+      data = append(data, parseAlbum(value))
+    }
     return true
   })
 
   downloadItems(data)
 }
 
-func downloadItems(payload []Album) {
-  for _, value := range payload {
-    download(value)
-  }
+func parseAlbum(value gjson.Result) Album {
+  var album Album
+  album.Artist = value.Get("artist").String()
+  album.Title = value.Get("title").String()
+  album.Url = value.Get(downloadStr).String()
+  fmt.Println(album.Url)
+  return album
 }
 
-// func downloadMultiple(items []DownloadItem) {
-//   for i:= 0; i < len(items); i++{
-//     if (len(items[i].tralbums) > 0) {
-//       for t := 0; t < len(items[i].tralbums); t++ {
-//         downloadItem(items[i].tralbums[t])
-//       }
-//     }
-//   }
-// }
+func downloadItems(payload []Album) {
+  // var wG sync.WaitGroup
+
+  for _, value := range payload {
+    // wG.Add(1)
+    // download(value, &wG)
+    download(value)
+  }
+
+  // wG.Wait()
+}
 
 func download(item Album) {
   filestring := fmt.Sprintf("%s - %s", item.Artist, item.Title)
@@ -140,9 +160,16 @@ func download(item Album) {
 
   if _, err := os.Stat(zip); errors.Is(err, os.ErrNotExist) {
     doDownload(item.Url)
+    doUnzip(zip, filestring)
+    if !keepArchives {
+      rmDownload(zip)
+    }
   } else {
     if _, err := os.Stat(filestring); errors.Is(err,os.ErrNotExist) {
       doUnzip(zip, filestring)
+      if !keepArchives {
+        rmDownload(zip)
+      }
     }
   }
 }
