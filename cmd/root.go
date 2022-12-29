@@ -11,16 +11,15 @@ import (
   "errors"
   "net/http"
   "regexp"
-  "time"
   "strings"
-  // "sync"
+  "sync"
 
+  "github.com/dustin/go-humanize"
   "github.com/PuerkitoBio/goquery"
   "github.com/spf13/cobra"
   "github.com/tidwall/gjson"
   "github.com/cavaliergopher/grab/v3"
-  "github.com/artdarek/go-unzip"
-  "github.com/gosuri/uilive"
+  "github.com/gosuri/uiprogress"
 )
 
 type Album struct {
@@ -69,6 +68,7 @@ func Execute() {
     fmt.Println(err)
     os.Exit(1)
   }
+  uiprogress.Start()
 }
 
 func checkFormat() bool {
@@ -108,7 +108,6 @@ func parseHtml(body io.ReadCloser) {
   if !exists {
     fmt.Printf("data does not exist")
   }
-  // fmt.Println(val)
   parseJSON(val)
 }
 
@@ -137,23 +136,24 @@ func parseAlbum(value gjson.Result) Album {
   album.Artist = value.Get("artist").String()
   album.Title = value.Get("title").String()
   album.Url = value.Get(downloadStr).String()
-  fmt.Println(album.Url)
   return album
 }
 
 func downloadItems(payload []Album) {
-  // var wG sync.WaitGroup
+  var wG sync.WaitGroup
+
+  uiprogress.Start()
 
   for _, value := range payload {
-    // wG.Add(1)
-    // download(value, &wG)
-    download(value)
+    wG.Add(1)
+    go download(value, &wG)
   }
 
-  // wG.Wait()
+  wG.Wait()
 }
 
-func download(item Album) {
+func download(item Album, wg *sync.WaitGroup) {
+  defer wg.Done()
   filestring := fmt.Sprintf("%s - %s", item.Artist, item.Title)
   filestring = titleRe.ReplaceAllString(filestring, "-")
   zip := filestring + ".zip"
@@ -177,41 +177,45 @@ func download(item Album) {
 func doDownload(url string) {
   req, _ := grab.NewRequest(".", url)
 
-  writer := uilive.New()
-  writer.Start()
-  fmt.Fprintf(writer, "Downloading %v...\n", req.URL())
   resp := client.Do(req)
+
+  bar := uiprogress.AddBar(100).AppendCompleted().PrependElapsed()
+
+  bar.PrependFunc(func(b *uiprogress.Bar) string {
+    return fmt.Sprintf("transferred %v / %v bytes", 
+      humanize.Bytes(uint64(resp.BytesComplete())),
+      humanize.Bytes(uint64(resp.Size())),
+    )
+  })
   
   var i int64
   i = 0
   for i < resp.Size() {
-    fmt.Fprintf(writer, "transferred %v / %v bytes (%.2f%%)\n",
-      resp.BytesComplete(),
-      resp.Size(),
-      resp.Progress()*100)
-    time.Sleep(time.Millisecond * 500)
     i = resp.BytesComplete()
+    bar.Set(int(resp.Progress()*100))
+    bar.Incr()
   }
 
   // check for errors
   if err := resp.Err(); err != nil {
-    fmt.Fprintf(writer, "Download failed: %v\n", err)
+    fmt.Printf("Download failed: %v\n", err)
     os.Exit(1)
   }
 
-  fmt.Fprintf(writer, "Download saved to ./%v \n", resp.Filename)
-  writer.Stop()
+  fmt.Printf("Download saved to ./%v \n", resp.Filename)
 }
 
 func doUnzip(src string, dest string) {
-  uz := unzip.New(src, dest)
+  uz := New()
 
-  uz.Extract()
+  uz.Extract(src, dest)
 }
 
 func rmDownload(file string) {
-  err := os.Remove(file)
-  if err != nil {
-    fmt.Println(err)
+  if _, err := os.Stat(file); err == nil {
+    err := os.Remove(file)
+    if err != nil {
+      fmt.Println(err)
+    }
   }
 }
