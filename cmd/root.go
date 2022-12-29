@@ -150,6 +150,7 @@ func downloadItems(payload []Album) {
   }
 
   wG.Wait()
+  uiprogress.Stop()
 }
 
 func download(item Album, wg *sync.WaitGroup) {
@@ -188,21 +189,17 @@ func doDownload(url string) {
     )
   })
   
-  var i int64
-  i = 0
-  for i < resp.Size() {
-    i = resp.BytesComplete()
+  for bar.Incr() {
     bar.Set(int(resp.Progress()*100))
-    bar.Incr()
   }
 
   // check for errors
   if err := resp.Err(); err != nil {
-    fmt.Printf("Download failed: %v\n", err)
+    fmt.Sprintln("Download failed: %v\n", err)
     os.Exit(1)
   }
 
-  fmt.Printf("Download saved to ./%v \n", resp.Filename)
+  fmt.Sprintln("Download saved to ./%v \n", resp.Filename)
 }
 
 func doUnzip(src string, dest string) {
