@@ -203,6 +203,9 @@ func doDownload(url string) {
 }
 
 func doUnzip(src string, dest string) {
+  if _, err := os.Stat(src); errors.Is(err,os.ErrNotExist) {
+    return
+  }
   uz := New()
 
   uz.Extract(src, dest)
