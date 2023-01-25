@@ -59,7 +59,7 @@ download pages.`,
 var client = grab.NewClient()
 
 func init() {
-  rootCmd.PersistentFlags().StringVar(&format, "format", "alac", "format to download items. default is ALAC")
+  rootCmd.PersistentFlags().StringVar(&format, "format", "flac", "format to download items. default is 'flac'")
   rootCmd.PersistentFlags().BoolVarP(&keepArchives, "keep-archives", "D", false, "Keep zip files after extraction?")
 }
 
