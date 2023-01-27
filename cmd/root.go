@@ -166,7 +166,7 @@ func download(item Album, wg *sync.WaitGroup) {
       rmDownload(zip)
     }
   } else {
-    if _, err := os.Stat(filestring); errors.Is(err,os.ErrNotExist) {
+    if _, err := os.Stat(filestring); errors.Is(err, os.ErrNotExist) {
       doUnzip(zip, filestring)
       if !keepArchives {
         rmDownload(zip)
@@ -203,7 +203,7 @@ func doDownload(url string) {
 }
 
 func doUnzip(src string, dest string) {
-  if _, err := os.Stat(src); errors.Is(err,os.ErrNotExist) {
+  if _, err := os.Stat(src); err == nil {
     return
   }
   uz := New()
