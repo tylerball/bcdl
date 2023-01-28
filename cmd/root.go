@@ -68,7 +68,6 @@ func Execute() {
     fmt.Println(err)
     os.Exit(1)
   }
-  uiprogress.Start()
 }
 
 func checkFormat() bool {
@@ -154,14 +153,16 @@ func downloadItems(payload []Album) {
 }
 
 func download(item Album, wg *sync.WaitGroup) {
+  var fname string
+
   defer wg.Done()
   filestring := fmt.Sprintf("%s - %s", item.Artist, item.Title)
   filestring = titleRe.ReplaceAllString(filestring, "-")
   zip := filestring + ".zip"
 
   if _, err := os.Stat(zip); errors.Is(err, os.ErrNotExist) {
-    doDownload(item.Url)
-    doUnzip(zip, filestring)
+    fname = doDownload(item.Url)
+    doUnzip(fname, filestring)
     if !keepArchives {
       rmDownload(zip)
     }
@@ -175,7 +176,7 @@ func download(item Album, wg *sync.WaitGroup) {
   }
 }
 
-func doDownload(url string) {
+func doDownload(url string) string {
   req, _ := grab.NewRequest(".", url)
 
   resp := client.Do(req)
@@ -199,16 +200,19 @@ func doDownload(url string) {
     os.Exit(1)
   }
 
-  fmt.Sprintln("Download saved to ./%v \n", resp.Filename)
+  return resp.Filename
 }
 
-func doUnzip(src string, dest string) {
-  if _, err := os.Stat(src); err == nil {
-    return
+func doUnzip(src string, dest string) error {
+  if _, err := os.Stat(src); errors.Is(err, os.ErrNotExist) {
+    fmt.Sprintln("zip file not found")
+    return errors.New("zip file not found")
   }
   uz := New()
 
   uz.Extract(src, dest)
+
+  return nil
 }
 
 func rmDownload(file string) {
